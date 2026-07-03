@@ -1,0 +1,83 @@
+// Mirror of the backend response shapes. Keep in sync by hand.
+
+// ── Cross-platform hub ──────────────────────────────────────────────────────
+export type Platform = "youtube" | "instagram";
+
+export interface SocialAccount {
+  id: string;
+  label: string;
+  ref: string | null; // channel_id (YT) / account_id (IG); null = not connected
+  connected: boolean;
+}
+
+export interface SocialOwner {
+  id: string;
+  name: string;
+  accounts: Record<Platform, SocialAccount[]>;
+}
+
+export interface SocialConfig {
+  owners: SocialOwner[];
+  platforms: Platform[];
+}
+
+// ── YouTube ─────────────────────────────────────────────────────────────────
+export type YoutubePreset =
+  | "last_7d"
+  | "last_30d"
+  | "last_90d"
+  | "this_year"
+  | "all_time";
+
+export interface YoutubeAccountSummary {
+  channel_id: string;
+  channel_title: string;
+  subscriber_count: number;
+  views: number;
+  subscribers_gained: number;
+  watch_minutes: number;
+  latest_available: string | null;
+}
+
+export interface YoutubeDashboard {
+  account_name: string;
+  channel_title: string;
+  preset: YoutubePreset;
+  channel_id: string | null;
+  row_count: number;
+  metric_fields: string[];
+  kpis: Record<string, number>;
+  timeseries: Array<Record<string, number | string>>;
+  window: { from: string; to: string };
+  latest_available: string | null;
+  today: string;
+}
+
+// ── Instagram ───────────────────────────────────────────────────────────────
+export interface InstagramAccountSummary {
+  account_id: string;
+  username: string;
+  views: number;
+  reach: number;
+  saves: number;
+  shares: number;
+}
+
+export interface InstagramPeriod {
+  start: string;
+  end: string;
+  views: number;
+  reach: number | null;
+  saves: number;
+  shares: number;
+}
+
+export interface InstagramDashboard {
+  account_name: string;
+  username: string;
+  account_id: string;
+  granularity: "week" | "month";
+  periods: InstagramPeriod[]; // oldest → newest
+  latest_available: string | null;
+  today: string;
+}

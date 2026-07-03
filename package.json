@@ -1,0 +1,15 @@
+{
+  "name": "social-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Cross-platform (YouTube + Instagram) social analytics dashboard, powered by Windsor.ai.",
+  "scripts": {
+    "dev": "concurrently -n api,web -c green,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "cd backend && ../.venv/bin/uvicorn app.main:app --reload --port 8010",
+    "dev:web": "cd frontend && npm run dev",
+    "install:frontend": "cd frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  }
+}
