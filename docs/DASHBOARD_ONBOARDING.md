@@ -1,9 +1,10 @@
 # Social Analytics Dashboard — Onboarding & Architecture Playbook
 
 This is the templatized process for the cross-platform (YouTube + Instagram)
-analytics dashboard. **Onboarding a new account is a one-file config change** —
-every new channel/account renders in the exact same format as the existing
-ones. This doc is the runbook + the hard-won Windsor gotchas that make it work.
+analytics dashboard. **Accounts are discovered automatically from Windsor** —
+connect an account there, refresh the app, and it appears (initially under
+"Unassigned"); one click assigns it to an owner. No code changes, no redeploys.
+This doc is the runbook + the hard-won Windsor gotchas that make it work.
 
 ---
 
@@ -20,11 +21,13 @@ Owner   (Aditya Kachave · Aditya Goenka · Be10x …)      ← dropdown
 - **YouTube detail** — `/youtube/:channelId` ([YoutubeDashboard.tsx](../frontend/src/pages/YoutubeDashboard.tsx))
 - **Instagram detail** — `/instagram/:accountId` ([InstagramDashboard.tsx](../frontend/src/pages/InstagramDashboard.tsx))
 
-**The single source of truth for "who owns what" is
-[`backend/app/social_config.py`](../backend/app/social_config.py).** Windsor has
-no concept of an "owner" — it just exposes connected accounts — so this file is
-where we group accounts under a person/brand. Everything else (cards, stats,
-drill-in) is generated from it.
+**Accounts are discovered dynamically** — the hub lists whatever the Windsor
+connectors return (`/api/youtube/accounts`, `/api/instagram/accounts`). Windsor
+has no concept of an "owner", so the only stored bit is a small
+**account → owner** map ([`backend/app/assignments.py`](../backend/app/assignments.py)),
+persisted in Vercel KV / Upstash Redis in prod (a local JSON file in dev). A
+newly discovered account with no assignment shows under **"Unassigned"** until
+someone picks an owner from the card's dropdown.
 
 ---
 
@@ -41,39 +44,25 @@ drill-in) is generated from it.
 3. Make sure the Windsor plan is active (a lapsed trial returns a "license
    expired" sentinel — see §4).
 
-### Step B — Find the account's Windsor identifier
-Run this (replace the key if it rotated — it lives in repo-root `.env` as
-`WINDSOR_API_KEY`):
+### Step B — Refresh the dashboard, then assign the owner
+That's it — no code. The new account **auto-appears** on the hub under
+**Unassigned** (an amber banner flags it). Open its card's **owner dropdown** and
+either pick an existing owner or type a new one. Done — it's grouped, remembered,
+and renders in the standard format. Reassigning/unassigning is the same dropdown.
 
-```bash
-# YouTube — list connected channels + their channel_id
-curl -s "https://connectors.windsor.ai/youtube?api_key=$WINDSOR_API_KEY&date_from=2026-06-01&date_to=2026-06-30&fields=channel_id,channel_title&_renderer=json"
+> The account's `channel_id`/`account_id` and display name all come from Windsor
+> automatically; nothing to look up or paste. (If you ever need the raw id, e.g.
+> for the seed map, `GET /api/youtube/accounts` or `/api/instagram/accounts`
+> returns them.)
 
-# Instagram — list connected accounts + their account_id
-curl -s "https://connectors.windsor.ai/instagram?api_key=$WINDSOR_API_KEY&date_from=2026-06-03&date_to=2026-06-30&fields=account_id,username&_renderer=json"
-```
-
-- YouTube identifier = **`channel_id`** (looks like `UCkZyATqruBa-0XFO3tksGgw`).
-- Instagram identifier = **`account_id`** (17-digit, e.g. `17841458560249205`).
-
-### Step C — Add it to `social_config.py`
-Edit the `OWNERS` list. Put the account under the right owner (add a new owner
-dict if needed). Set the identifier — that's what flips `connected` to true:
-
-```python
-# YouTube account
-{"id": "yt-<slug>", "label": "Channel Name", "channel_id": "UC..."}
-
-# Instagram account
-{"id": "ig-<slug>", "label": "@username", "account_id": "17841..."}
-```
-
-A placeholder (not yet connected) card is just the same entry with the
-identifier set to `None`.
-
-### Step D — Restart the API (dev: it auto-reloads)
-Done. The new card appears on the hub with live stats and drills into a full
-dashboard in the standard format. **No frontend changes, no new routes.**
+### Prod persistence — one-time setup
+Owner assignments persist in **Vercel KV / Upstash Redis** because Vercel's
+filesystem is read-only. Create a store in the Vercel dashboard (Storage → create
+Upstash Redis → connect to the project); it auto-injects `KV_REST_API_URL` /
+`KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `_TOKEN`), which
+[`assignments.py`](../backend/app/assignments.py) reads. Without it the app still
+runs, but shows the seeded grouping read-only (assignments won't save in prod).
+The seed lives in `assignments.py` (`SEED`).
 
 ---
 
@@ -161,7 +150,8 @@ Snapshots (subscriber_count, followers_count) → take the latest, never sum.
 
 | File | Role |
 |------|------|
-| [`social_config.py`](../backend/app/social_config.py) | Owner → account map (the file you edit to onboard) |
+| [`assignments.py`](../backend/app/assignments.py) | account → owner map + persistence (KV in prod, file in dev); `SEED` |
+| [`routes/social.py`](../backend/app/routes/social.py) | GET/POST `/api/social/assignments` |
 | [`routes/social.py`](../backend/app/routes/social.py) | `GET /api/social/config` |
 | [`routes/windsor.py`](../backend/app/routes/windsor.py) | YouTube: `/api/youtube/accounts`, `/api/youtube/dashboard?channel_id=` |
 | [`routes/instagram.py`](../backend/app/routes/instagram.py) | Instagram: `/api/instagram/accounts`, `/api/instagram/dashboard?account_id=&granularity=` |

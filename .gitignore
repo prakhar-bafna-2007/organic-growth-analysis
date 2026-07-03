@@ -13,3 +13,8 @@ frontend/tsconfig.tsbuildinfo
 
 # OS / editor
 .DS_Store
+.vercel
+.env*
+
+# Local dev owner-assignment store (prod uses KV)
+backend/assignments.json

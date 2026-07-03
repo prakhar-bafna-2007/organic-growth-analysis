@@ -2,15 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { LayoutGrid, Youtube, Instagram, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import type {
+  Assignments,
+  DiscoveredAccount,
   InstagramAccountSummary,
   Platform,
-  SocialConfig,
   YoutubeAccountSummary,
 } from "../lib/types";
 import {
+  fetchAssignments,
   fetchInstagramAccounts,
-  fetchSocialConfig,
   fetchYoutubeAccounts,
+  setAssignment,
 } from "../lib/api";
 import { Dropdown } from "../components/Dropdown";
 import { AccountCard } from "../components/AccountCard";
@@ -20,53 +22,91 @@ const PLATFORM_TABS: { key: Platform; label: string; icon: typeof Youtube }[] = 
   { key: "instagram", label: "Instagram", icon: Instagram },
 ];
 
+const UNASSIGNED = "__unassigned__";
+const emptyAssignments: Assignments = { youtube: {}, instagram: {} };
+
 export function Dashboard() {
-  const [config, setConfig] = useState<SocialConfig | null>(null);
-  const [ytAccounts, setYtAccounts] = useState<YoutubeAccountSummary[]>([]);
-  const [igAccounts, setIgAccounts] = useState<InstagramAccountSummary[]>([]);
-  const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [assignments, setAssignments] = useState<Assignments | null>(null);
+  const [yt, setYt] = useState<YoutubeAccountSummary[]>([]);
+  const [ig, setIg] = useState<InstagramAccountSummary[]>([]);
   const [platform, setPlatform] = useState<Platform>("youtube");
-  const [error, setError] = useState<string | null>(null);
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchSocialConfig()
-      .then((c) => {
-        setConfig(c);
-        setOwnerId((prev) => prev ?? c.owners[0]?.id ?? null);
-      })
-      .catch((e: unknown) =>
-        setError(e instanceof Error ? e.message : "Failed to load")
-      );
-    // Live YouTube stats are best-effort — cards still render (without numbers)
-    // if this fails, but we surface the reason (e.g. an expired Windsor license).
+    fetchAssignments()
+      .then((r) => setAssignments(r.assignments))
+      .catch(() => setAssignments(emptyAssignments));
     fetchYoutubeAccounts()
-      .then((r) => setYtAccounts(r.accounts))
-      .catch((e: unknown) => {
-        setYtAccounts([]);
-        setNotice(e instanceof Error ? e.message : "Couldn't load live stats.");
-      });
+      .then((r) => setYt(r.accounts))
+      .catch((e: unknown) => setNotice(e instanceof Error ? e.message : "Couldn't load YouTube stats."));
     fetchInstagramAccounts()
-      .then((r) => setIgAccounts(r.accounts))
-      .catch(() => setIgAccounts([]));
+      .then((r) => setIg(r.accounts))
+      .catch(() => setIg([]));
   }, []);
 
-  const owner = useMemo(
-    () => config?.owners.find((o) => o.id === ownerId) ?? null,
-    [config, ownerId]
-  );
-  const accounts = owner?.accounts[platform] ?? [];
-  const summaryByChannel = useMemo(() => {
-    const m = new Map<string, YoutubeAccountSummary>();
-    ytAccounts.forEach((a) => m.set(a.channel_id, a));
-    return m;
-  }, [ytAccounts]);
-  const igByAccount = useMemo(() => {
-    const m = new Map<string, InstagramAccountSummary>();
-    igAccounts.forEach((a) => m.set(a.account_id, a));
-    return m;
-  }, [igAccounts]);
-  const noneConnected = accounts.length > 0 && accounts.every((a) => !a.connected);
+  // Join discovered Windsor accounts with their owner assignment.
+  const accounts: DiscoveredAccount[] = useMemo(() => {
+    const a = assignments ?? emptyAssignments;
+    const ytA: DiscoveredAccount[] = yt.map((x) => ({
+      platform: "youtube",
+      ref: x.channel_id,
+      label: x.channel_title || x.channel_id,
+      owner: a.youtube[x.channel_id] ?? null,
+      yt: x,
+    }));
+    const igA: DiscoveredAccount[] = ig.map((x) => ({
+      platform: "instagram",
+      ref: x.account_id,
+      label: x.username ? `@${x.username}` : x.account_id,
+      owner: a.instagram[x.account_id] ?? null,
+      ig: x,
+    }));
+    return [...ytA, ...igA];
+  }, [yt, ig, assignments]);
+
+  // Owner names come from assignments — dynamic, no hardcoded list.
+  const ownerNames = useMemo(() => {
+    const a = assignments ?? emptyAssignments;
+    const names = new Set<string>([
+      ...Object.values(a.youtube),
+      ...Object.values(a.instagram),
+    ]);
+    return [...names].sort((x, y) => x.localeCompare(y));
+  }, [assignments]);
+
+  const unassignedCount = accounts.filter((x) => !x.owner).length;
+
+  // Options for the owner selector: owners + an Unassigned bucket when needed.
+  const ownerOptions = useMemo(() => {
+    const opts = ownerNames.map((o) => ({ key: o, label: o }));
+    if (unassignedCount > 0)
+      opts.push({ key: UNASSIGNED, label: `Unassigned (${unassignedCount})` });
+    return opts;
+  }, [ownerNames, unassignedCount]);
+
+  // Default / keep the owner selection valid as data loads and changes.
+  useEffect(() => {
+    if (ownerOptions.length === 0) return;
+    const valid = ownerOptions.some((o) => o.key === ownerFilter);
+    if (!valid) setOwnerFilter(ownerOptions[0].key);
+  }, [ownerOptions, ownerFilter]);
+
+  const shown = accounts.filter((x) => {
+    if (x.platform !== platform) return false;
+    return ownerFilter === UNASSIGNED ? !x.owner : x.owner === ownerFilter;
+  });
+
+  async function assign(acc: DiscoveredAccount, owner: string) {
+    try {
+      const r = await setAssignment(acc.platform, acc.ref, owner);
+      setAssignments(r.assignments);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Couldn't save assignment.");
+    }
+  }
+
+  const loading = assignments === null;
 
   return (
     <div className="mx-auto max-w-6xl px-6 pb-24 pt-12">
@@ -85,22 +125,21 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* owner selector */}
-        {config && config.owners.length > 0 && (
+        {ownerOptions.length > 0 && ownerFilter && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted">Owner</span>
             <Dropdown
-              value={ownerId ?? config.owners[0].id}
-              options={config.owners.map((o) => ({ key: o.id, label: o.name }))}
-              onChange={setOwnerId}
-              className="min-w-[160px]"
+              value={ownerFilter}
+              options={ownerOptions}
+              onChange={setOwnerFilter}
+              className="min-w-[170px]"
             />
           </div>
         )}
       </header>
 
       {/* platform tabs */}
-      <div className="mt-6 flex gap-1 rounded-full bg-card p-1 w-fit">
+      <div className="mt-6 flex w-fit gap-1 rounded-full bg-card p-1">
         {PLATFORM_TABS.map((t) => {
           const Icon = t.icon;
           return (
@@ -121,73 +160,57 @@ export function Dashboard() {
         })}
       </div>
 
-      {error && (
-        <div className="mt-8 flex items-start gap-3 rounded-xl bg-neon-red/10 px-4 py-3 text-sm text-neon-red">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          {error}
-        </div>
-      )}
-
       {notice && (
         <div className="mt-6 flex items-start gap-3 rounded-xl bg-neon-amber/10 px-4 py-3 text-sm text-neon-amber">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
-            <div className="font-medium">Live stats unavailable</div>
+            <div className="font-medium">Heads up</div>
             <div className="mt-0.5 text-neon-amber/80">{notice}</div>
           </div>
         </div>
       )}
 
-      {/* account cards */}
-      {config && (
-        <section className="mt-6">
-          {accounts.length === 0 ? (
-            <p className="text-sm text-muted">
-              No {platform} accounts configured for {owner?.name}.
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {accounts.map((a) => {
-                const summary =
-                  platform === "youtube" && a.ref
-                    ? summaryByChannel.get(a.ref)
-                    : undefined;
-                const igSummary =
-                  platform === "instagram" && a.ref
-                    ? igByAccount.get(a.ref)
-                    : undefined;
-                const href =
-                  a.connected && a.ref ? `/${platform}/${a.ref}` : undefined;
-                return (
-                  <AccountCard
-                    key={a.id}
-                    label={a.label}
-                    platform={platform}
-                    connected={a.connected}
-                    summary={summary}
-                    igSummary={igSummary}
-                    href={href}
-                  />
-                );
-              })}
-            </div>
-          )}
-
-          {platform === "instagram" && noneConnected && (
-            <p className="mt-5 text-xs text-muted">
-              No Instagram accounts connected for {owner?.name} yet. Add one in
-              Windsor and these cards will light up with live stats.
-            </p>
-          )}
-        </section>
+      {unassignedCount > 0 && ownerFilter !== UNASSIGNED && (
+        <button
+          onClick={() => setOwnerFilter(UNASSIGNED)}
+          className="mt-6 flex w-full items-center gap-2 rounded-xl bg-neon-amber/10 px-4 py-2.5 text-left text-sm text-neon-amber transition-colors hover:bg-neon-amber/15"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {unassignedCount} account{unassignedCount !== 1 ? "s" : ""} newly discovered from
+          Windsor need an owner — click to assign.
+        </button>
       )}
 
-      {!config && !error && (
+      {/* account cards */}
+      {loading ? (
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-40 animate-pulse rounded-2xl bg-card" />
+            <div key={i} className="h-52 animate-pulse rounded-2xl bg-card" />
           ))}
         </div>
+      ) : shown.length === 0 ? (
+        <p className="mt-8 text-sm text-muted">
+          No {platform} accounts{" "}
+          {ownerFilter === UNASSIGNED ? "are unassigned" : `for ${ownerFilter}`}.
+        </p>
+      ) : (
+        <section className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {shown.map((acc) => (
+            <AccountCard
+              key={`${acc.platform}:${acc.ref}`}
+              label={acc.label}
+              platform={acc.platform}
+              href={`/${acc.platform}/${acc.ref}`}
+              summary={acc.yt}
+              igSummary={acc.ig}
+              assign={{
+                current: acc.owner,
+                owners: ownerNames,
+                onAssign: (owner) => assign(acc, owner),
+              }}
+            />
+          ))}
+        </section>
       )}
     </div>
   );

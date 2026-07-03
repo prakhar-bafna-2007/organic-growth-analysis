@@ -1,7 +1,8 @@
 import type {
+  AssignmentsResponse,
   InstagramAccountSummary,
   InstagramDashboard,
-  SocialConfig,
+  Platform,
   YoutubeAccountSummary,
   YoutubeDashboard,
   YoutubePreset,
@@ -20,9 +21,23 @@ async function detailError(res: Response, fallback: string): Promise<never> {
   throw new Error(detail);
 }
 
-export async function fetchSocialConfig(): Promise<SocialConfig> {
-  const res = await fetch(`${API_BASE}/social/config`);
-  if (!res.ok) throw new Error(`Failed to load config: ${res.status}`);
+export async function fetchAssignments(): Promise<AssignmentsResponse> {
+  const res = await fetch(`${API_BASE}/social/assignments`);
+  if (!res.ok) throw new Error(`Failed to load assignments: ${res.status}`);
+  return res.json();
+}
+
+export async function setAssignment(
+  platform: Platform,
+  ref: string,
+  owner: string
+): Promise<AssignmentsResponse> {
+  const res = await fetch(`${API_BASE}/social/assignments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ platform, ref, owner }),
+  });
+  if (!res.ok) await detailError(res, "Failed to save assignment");
   return res.json();
 }
 

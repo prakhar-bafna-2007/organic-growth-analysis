@@ -3,22 +3,23 @@
 // ── Cross-platform hub ──────────────────────────────────────────────────────
 export type Platform = "youtube" | "instagram";
 
-export interface SocialAccount {
-  id: string;
-  label: string;
-  ref: string | null; // channel_id (YT) / account_id (IG); null = not connected
-  connected: boolean;
-}
+// Accounts are discovered from Windsor; this map only records which owner each
+// discovered account (by channel_id / account_id) is assigned to.
+export type Assignments = Record<Platform, Record<string, string>>;
 
-export interface SocialOwner {
-  id: string;
-  name: string;
-  accounts: Record<Platform, SocialAccount[]>;
-}
-
-export interface SocialConfig {
-  owners: SocialOwner[];
+export interface AssignmentsResponse {
+  assignments: Assignments;
   platforms: Platform[];
+}
+
+// A discovered account joined with its owner assignment, for rendering.
+export interface DiscoveredAccount {
+  platform: Platform;
+  ref: string; // channel_id / account_id
+  label: string; // channel title / @username
+  owner: string | null; // null = unassigned
+  yt?: YoutubeAccountSummary;
+  ig?: InstagramAccountSummary;
 }
 
 // ── YouTube ─────────────────────────────────────────────────────────────────
